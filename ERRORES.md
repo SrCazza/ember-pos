@@ -152,3 +152,34 @@ USING (
 ```
 **Archivo corregido**: `supabase/migrations/008_rls_orders_delivered.sql`
 **Regla**: Al diseñar transiciones de estado con RLS, el `USING` debe permitir el estado ORIGEN de cada transición que el rol necesita hacer. Revisar todas las transiciones de la máquina de estados contra el USING de cada rol.
+
+---
+
+## E10 — RLS `profiles_read_own` bloqueaba JOIN kitchen→waiter: mostraba "Camarero" en KDS
+
+**Fecha**: 2026-06-09
+**Síntoma**: Las tarjetas de cocina mostraban "Camarero" en lugar del nombre real del camarero que creó la orden. El email tampoco aparecía.
+**Causa**: La política `profiles_read_own` permitía leer únicamente el propio perfil (`auth.uid() = id`). La query del KDS hace un JOIN implícito `orders → profiles(name, email)` para obtener el nombre del camarero. Al ejecutarse con la sesión del usuario de cocina, Supabase evaluaba RLS en la tabla `profiles` y bloqueaba silenciosamente cualquier fila que no fuera el propio usuario — devolviendo `null` en el JOIN, que el código mostraba como fallback "Camarero".
+**Fix**: Migration 013 — reemplazar la política por una que permita lectura a todos los usuarios autenticados:
+```sql
+DROP POLICY IF EXISTS "profiles_read_own" ON profiles;
+CREATE POLICY "profiles_read_authenticated" ON profiles FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+```
+**Archivo corregido**: `supabase/migrations/013_profiles_read_policy.sql`
+**Regla**: En sistemas con roles internos (staff-only, sin datos de clientes), la política de lectura en `profiles` debe ser `auth.uid() IS NOT NULL`. La restricción `auth.uid() = id` rompe cualquier JOIN cross-user, incluyendo los necesarios para mostrar metadatos de creador/asignado en listas de recursos.
+
+---
+
+## E11 — Columna `email` ausente en `profiles`: se asumió que Supabase Auth la exponía automáticamente
+
+**Fecha**: 2026-06-09
+**Síntoma**: Intentar mostrar el email del camarero en las tarjetas de cocina falló porque la tabla `profiles` no tenía columna `email`, y el JOIN `profiles(name, email)` devolvía error de columna inexistente.
+**Causa**: Se diseñó el modelo de datos asumiendo que `auth.users.email` sería accesible mediante el JOIN con `profiles`. En Supabase, `auth.users` es un esquema separado (`auth`) inaccesible directamente desde Client Components con la anon key. La tabla pública `profiles` solo tenía las columnas definidas explícitamente en la migration inicial.
+**Fix**: Migration 012 — añadir columna `email` a `profiles`, backfill desde `auth.users`, y actualizar el trigger `handle_new_user()` para persistirla al crear usuarios:
+```sql
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS email TEXT;
+UPDATE profiles p SET email = u.email FROM auth.users u WHERE p.id = u.id;
+```
+**Archivo corregido**: `supabase/migrations/012_profiles_email.sql`
+**Regla**: Cualquier campo de `auth.users` que se necesite en queries del lado cliente (email, phone, metadata) debe desnormalizarse en la tabla `profiles` pública y mantenerse sincronizado mediante el trigger `handle_new_user()`. No asumir acceso directo al esquema `auth` desde el cliente.
