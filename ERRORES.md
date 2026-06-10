@@ -183,3 +183,47 @@ UPDATE profiles p SET email = u.email FROM auth.users u WHERE p.id = u.id;
 ```
 **Archivo corregido**: `supabase/migrations/012_profiles_email.sql`
 **Regla**: Cualquier campo de `auth.users` que se necesite en queries del lado cliente (email, phone, metadata) debe desnormalizarse en la tabla `profiles` pública y mantenerse sincronizado mediante el trigger `handle_new_user()`. No asumir acceso directo al esquema `auth` desde el cliente.
+
+---
+
+## E12 — Filtro de estación en KDS rompía el guard `allReady`: cocina podía marcar orden lista sin completar todos los ítems
+
+**Fecha**: 2026-06-10
+**Síntoma**: Con un filtro de estación activo (ej. "Parrilla"), el botón "Marcar lista" se habilitaba aunque ítems de otras estaciones ("Fríos") todavía estuvieran pendientes. La orden pasaba a `ready` en DB pero en la vista del camarero los botones de entrega quedaban bloqueados (`group.allReady = false`), dejando la orden en un estado irrecuperable sin acción disponible.
+**Causa**: `withStationFilter` en `KitchenDisplay.tsx` filtraba los ítems ANTES de pasarlos a `<OrderCard>`. Dentro del card, `allReady = items.every(i => i.status === 'ready')` operaba sobre el subconjunto filtrado. Si todos los ítems de "Parrilla" estaban listos, `allReady` era `true` aunque "Fríos" tuviera ítems pendientes.
+**Fix**: Calcular `allItemsReady` sobre la lista completa (sin filtrar) y pasarlo como prop a `OrderCard`. El card usa este override en lugar del cálculo local cuando está presente. Además, `markOrderReady` ahora valida en servidor que no haya `order_items` con `status = 'pending'`.
+**Archivos corregidos**: `src/components/kitchen/KitchenDisplay.tsx`, `src/components/kitchen/OrderCard.tsx`, `src/lib/actions/orders.ts`
+**Regla**: Nunca calcular una validación de negocio sobre datos ya filtrados. Si el filtro es solo para display, calcular los guards sobre el dataset original antes de aplicar el filtro. Siempre acompañar los guards cliente con una validación servidor equivalente.
+
+---
+
+## E13 — `markOrderReady` sin validación server-side: guard solo existía en cliente
+
+**Fecha**: 2026-06-10
+**Síntoma**: El botón "Marcar lista" tenía un guard UI (`allReady`), pero la Server Action `markOrderReady` no verificaba nada. Cualquier llamada directa a la SA (o un bug de estado en el cliente, como E12) podía marcar una orden como lista con ítems pendientes.
+**Causa**: La Server Action actualizaba `orders.status = 'ready'` sin consultar el estado de los `order_items` asociados. El guard era puramente presentacional.
+**Fix**: Añadir al inicio de `markOrderReady` una query que cuente `order_items` con `status = 'pending'` para la orden. Si el count > 0, devolver `{ error: '...' }` sin actualizar.
+**Archivo corregido**: `src/lib/actions/orders.ts`
+**Regla**: Los guards de validación de negocio deben existir SIEMPRE en el servidor, independientemente de si existe un guard visual en el cliente. El cliente puede fallar, ser omitido, o tener bugs de estado.
+
+---
+
+## E14 — `delivered_at` de `order_items` no incluido en query del KDS: cocina ciega a recogidas parciales
+
+**Fecha**: 2026-06-10
+**Síntoma**: Cuando el camarero recogía una categoría parcialmente (`markCategoryDelivered`), la cocina no veía ningún cambio visual en las tarjetas del KDS. Los ítems recogidos aparecían idénticos a los no recogidos.
+**Causa**: La columna `delivered_at` fue añadida a `order_items` en migration 010, y `markCategoryDelivered` la actualiza correctamente. Pero el select de `fetchOrders` en `KitchenDisplay.tsx` no incluía `delivered_at` en la lista de campos de `order_items`. El campo existía en DB pero nunca llegaba al cliente.
+**Fix**: Añadir `delivered_at` al select de `order_items` en `fetchOrders`. Actualizar la interfaz `KitchenOrder.items` y el mapping. En `OrderItemRow`, renderizar un estado visual "↑ recogido" cuando `deliveredAt` tiene valor.
+**Archivos corregidos**: `src/components/kitchen/KitchenDisplay.tsx`, `src/components/kitchen/OrderCard.tsx`, `src/components/kitchen/OrderItemRow.tsx`
+**Regla**: Cuando se añade una columna a una tabla con una migration, revisar TODOS los selects que consultan esa tabla y decidir explícitamente si el campo es necesario en cada query. Una migration de schema no actualiza automáticamente los selects existentes.
+
+---
+
+## E15 — `markOrderDelivered` no seteaba `picked_up_at`: órdenes entregadas directamente por camarero nunca aparecían en historial de cocina
+
+**Fecha**: 2026-06-10
+**Síntoma**: Cuando el camarero usaba "Llevar todo y cobrar", la orden desaparecía del KDS (correcto — `status = 'delivered'`) pero nunca aparecía en la pestaña "Recogidas" del historial de cocina.
+**Causa**: La query de `fetchHistory` en `KitchenDisplay.tsx` filtra por `.not("picked_up_at", "is", null)`. El campo `picked_up_at` solo lo escribe `markOrderPickedUp`, que se llama cuando la cocina pulsa "Marcar recogido" manualmente. Si el camarero entrega directamente (bypassing el paso de cocina), `picked_up_at` permanece `null` y la orden no aparece en el historial, aunque `status = 'delivered'`.
+**Fix**: En `markOrderDelivered`, después de actualizar el status, hacer una segunda update que ponga `picked_up_at = NOW()` solo donde sea `null` (`.is("picked_up_at", null)`). Si cocina ya lo marcó antes, el timestamp original se preserva.
+**Archivo corregido**: `src/lib/actions/orders.ts`
+**Regla**: Cuando dos code paths distintos deben producir el mismo efecto observable (en este caso, "orden visible en historial"), ambos deben escribir todos los campos que ese efecto requiere. No asumir que un field siempre será poblado por otro flow previo.
