@@ -147,6 +147,13 @@ export async function markOrderDelivered(
 
   if (error) return { error: error.message }
 
+  // Asegurar que la orden aparezca en el historial de cocina
+  await supabase
+    .from("orders")
+    .update({ picked_up_at: new Date().toISOString() })
+    .eq("id", orderId)
+    .is("picked_up_at", null)
+
   // Liberar mesa si no tiene más órdenes activas
   if (order?.table_id) {
     const { count } = await supabase
