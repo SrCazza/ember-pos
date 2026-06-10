@@ -95,6 +95,16 @@ export async function sendToKitchen(orderId: string): Promise<{ error?: string }
 export async function markOrderReady(orderId: string): Promise<{ error?: string }> {
   const supabase = await createClient()
 
+  const { count } = await supabase
+    .from("order_items")
+    .select("id", { count: "exact", head: true })
+    .eq("order_id", orderId)
+    .eq("status", "pending")
+
+  if (count && count > 0) {
+    return { error: "Hay ítems sin marcar. Marca todos los ítems antes de marcar la orden como lista." }
+  }
+
   const { error } = await supabase
     .from("orders")
     .update({

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { type OrderStatus } from "@/types"
 import { formatRelativeTime, formatDuration, formatCurrency, formatOrderNumber } from "@/lib/utils/formatters"
 import { markOrderDelivered, markCategoryDelivered } from "@/lib/actions/orders"
+import { getTableColor } from "@/lib/utils/table-colors"
 import { ClipboardTextIcon } from "@phosphor-icons/react"
 
 // ─── Active orders types ────────────────────────────────────────────────────
@@ -421,7 +422,8 @@ export function ActiveOrdersList({ userId }: { userId: string }) {
               return (
                 <div
                   key={order.id}
-                  className={`rounded-xl border-2 p-4 space-y-3 transition-colors ${CARD_STYLE[order.status] ?? "border-zinc-200 bg-white"}`}
+                  className={`rounded-xl border-2 border-l-4 p-4 space-y-3 transition-colors ${CARD_STYLE[order.status] ?? "border-zinc-200 bg-white"}`}
+                  style={{ borderLeftColor: getTableColor(order.table_number) }}
                 >
                   {/* Encabezado */}
                   <div className="flex items-center justify-between gap-2">

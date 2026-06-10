@@ -38,6 +38,7 @@ interface KitchenOrder {
     category_id: string
     category_name: string
     category_icon: string
+    delivered_at: string | null
   }[]
 }
 
@@ -225,7 +226,7 @@ export function KitchenDisplay({ stations }: KitchenDisplayProps) {
         restaurant_tables(number),
         profiles(name, email),
         order_items(
-          id, quantity, notes, status, station_id, category_id,
+          id, quantity, notes, status, station_id, category_id, delivered_at,
           menu_items(name),
           menu_categories(name, icon)
         )
@@ -259,6 +260,7 @@ export function KitchenDisplay({ stations }: KitchenDisplayProps) {
             category_id: item.category_id ?? "",
             category_name: (item.menu_categories as { name: string } | null)?.name ?? "",
             category_icon: (item.menu_categories as { icon: string } | null)?.icon ?? "fork-knife",
+            delivered_at: item.delivered_at ?? null,
           })),
         }))
         // Exclude orders picked up in DB OR pending pickup locally (prevents race-condition re-appearance)
@@ -519,6 +521,10 @@ export function KitchenDisplay({ stations }: KitchenDisplayProps) {
                     isNew={newOrderIds.has(order.id)}
                     isAddition={order.is_addition}
                     items={order.items}
+                    allItemsReady={orders
+                      .find((o) => o.id === order.id)
+                      ?.items.every((i) => i.status === "ready" || !!i.delivered_at) ?? false
+                    }
                     onOrderReady={() => handleOrderReady(order.id)}
                   />
                 ))

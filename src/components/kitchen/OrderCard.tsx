@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { CategoryIcon } from "@/components/shared/CategoryIcon"
 import { markOrderReady } from "@/lib/actions/orders"
 import { formatDuration, formatOrderNumber } from "@/lib/utils/formatters"
+import { getTableColor } from "@/lib/utils/table-colors"
 import { UserIcon } from "@phosphor-icons/react/dist/ssr"
 import { useState, useCallback } from "react"
 
@@ -21,6 +22,7 @@ interface OrderItem {
   category_id: string
   category_name: string
   category_icon: string
+  delivered_at?: string | null
 }
 
 interface OrderCardProps {
@@ -39,6 +41,7 @@ interface OrderCardProps {
   onStart?: () => void
   onPickedUp?: () => void
   items: OrderItem[]
+  allItemsReady?: boolean
 }
 
 interface CategoryGroup {
@@ -81,12 +84,15 @@ export function OrderCard({
   onStart,
   onPickedUp,
   items,
+  allItemsReady,
 }: OrderCardProps) {
   const [marking, setMarking] = useState(false)
   const [pickingUp, setPickingUp] = useState(false)
   const [isUrgent, setIsUrgent] = useState(false)
-  const allReady = items.every((i) => i.status === "ready")
+  const localAllReady = items.every((i) => i.status === "ready" || !!i.delivered_at)
+  const allReady = allItemsReady ?? localAllReady
   const startTime = sentToKitchenAt ?? createdAt
+  const tableColor = getTableColor(tableNumber)
 
   const handleUrgencyChange = useCallback((urgent: boolean) => setIsUrgent(urgent), [])
 
@@ -125,6 +131,10 @@ export function OrderCard({
       <div className={`flex items-start justify-between px-4 py-3.5 border-b ${urgentActive ? "border-red-900/50 bg-red-950/15" : "border-zinc-800"}`}>
         <div>
           <div className="flex items-baseline gap-2">
+            <span
+              className="w-3 h-3 rounded-full shrink-0 self-center shadow-sm"
+              style={{ backgroundColor: tableColor }}
+            />
             <span className="text-5xl font-black text-zinc-100 leading-none tracking-tighter tabular-nums">
               {tableNumber}
             </span>
@@ -192,6 +202,7 @@ export function OrderCard({
                   notes={item.notes}
                   status={item.status}
                   readOnly={column === "ready"}
+                  deliveredAt={item.delivered_at ?? null}
                 />
               ))}
             </div>
@@ -206,6 +217,7 @@ export function OrderCard({
               notes={item.notes}
               status={item.status}
               readOnly={column === "ready"}
+              deliveredAt={item.delivered_at ?? null}
             />
           ))
         )}
